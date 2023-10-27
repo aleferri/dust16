@@ -1,15 +1,4 @@
 
-// IR:
-// 000xx -> ALU1
-// 001xx -> ALU2
-// 010xx -> MVX
-// 011b0 -> LDB/LDW
-// 01111 -> LDI
-// 100bx -> STB/STW
-// 1011l -> JMP/JAL
-// 110xx -> JZA
-// 111xx -> JCA
-
 // STATUS:
 // 000: KEEP
 // 001: PRE-FETCH
@@ -79,6 +68,7 @@ reg [ADR_TOP:0] ix;
 reg [ADR_TOP:0] pc;
 reg [5:0]  ir;
 reg [7:0]  db;
+reg ac_isz;
 
 reg [2:0] status;
 
@@ -177,13 +167,21 @@ always @(posedge clk) begin
     mem_req <= next_status[2] | (next_status == CS_FETCH);
 	 
     ar_set_bit <= next_status[2] & next_status[0];    
-	 ar_sel <= (next_status == CS_FETCH) | (next_status[2] & is_ldi);
+	ar_sel <= ( ~next_status[2] & ( ~next_status[1] ^ ~next_status[2] ) ) | (next_status[2] & is_ldi) | rst;
     
     if (next_status == CS_ST_BYTE_H) begin
         db <= ir[2] ? pc[ADR_TOP:8] : ac[DAT_TOP:8];
     end else begin
         db <= ir[2] ? pc[7:0] : ac[7:0];
     end
+	
+	`ifdef SIM_DEBUG
+	
+	$display("From status %b", status);
+	$display("To status %b\n", next_status);
+	$display("Is mem op %b %b", is_mem_op, is_full_word);
+	
+	`endif
     
     status <= next_status;
 end
@@ -196,20 +194,34 @@ end
 
 always @(posedge clk) begin
     ac <= alu_rs;
+    ac_isz <= (ac == 16'b0);
 end
 
-wire ac_isz = (ac == 16'b0);
 wire do_jpc = ac_isz & ~ir[2] | ac[15] & ir[2];
 
-wire ld_pc = (is_decode & (is_jmp | is_jpc & do_jpc)) || (is_st_byte_h & is_jal & ~m_wait);
+wire ld_pc = (is_decode & (is_jmp | is_jpc & do_jpc)) | (is_st_byte_h & is_jal & ~m_wait) | rst;
 wire inc_pc = (is_fetch | is_ld_byte_l | is_ld_byte_h) & ar_sel & ~m_wait;
 
 always @(posedge clk) begin
 	 if (ld_pc) begin
-        pc <= dr;
+        pc <= rst ? 16'b0 : dr;
     end else begin
         pc <= pc + inc_pc;
     end
 end
+
+`ifdef SIM_DEBUG
+
+always @(negedge clk) begin
+	$display("ASEL: %d", ar_sel);
+	$display("ADR: %d", m_addr);
+	$display("PC: %d", pc);
+	$display("IR: %d", ir);
+	$display("AC: %d", ac);
+	$display("DR: %b", dr);
+	$display("IX: %d\n", ix);
+end
+
+`endif
 
 endmodule
