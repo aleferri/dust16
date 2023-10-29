@@ -5,11 +5,11 @@ reg[7:0] cells[0:15];
 reg clk;
 reg rst;
 reg m_wait;
-reg[7:0] m_indata;
-wire[7:0] m_outdata;
+reg[7:0] m_idata;
+wire[7:0] m_odata;
 wire[15:0] m_addr;
-wire m_req;
-wire m_wr;
+wire m_cs;
+wire m_we;
 
 `define SIM_DEBUG
 
@@ -17,11 +17,11 @@ core tb_object(
     .clk(clk),
     .rst(rst),
     .m_wait(m_wait),
-    .m_indata(m_indata),
-    .m_outdata(m_outdata),
+    .m_idata(m_idata),
+    .m_otdata(m_odata),
     .m_addr(m_addr),
-    .m_req(m_req),
-    .m_wr(m_wr)
+    .m_cs(m_cs),
+    .m_we(m_we)
 );
 
 
@@ -34,13 +34,13 @@ always @(negedge clk) begin
 end
 
 always @(negedge clk) begin
-	m_indata = cells[m_addr[3:0]];
+	m_idata = cells[m_addr[3:0]];
 	
-	$display("rd @%d value %d\n", m_addr[3:0], m_indata);
+	$display("rd @%d value %d\n", m_addr[3:0], m_idata);
 	
-	if (m_req & m_wr) begin
-		$display("wr @%d value %d\n", m_addr[3:0], m_outdata);
-		cells[m_addr[3:0]] = m_outdata;
+	if (m_cs & m_we) begin
+		$display("wr @%d value %d\n", m_addr[3:0], m_odata);
+		cells[m_addr[3:0]] = m_odata;
 	end
 end
 
@@ -48,7 +48,7 @@ initial begin
     clk = 1'b0;
     rst = 1'b1;
     m_wait = 1'b0;
-    m_indata = 8'b0;
+    m_idata = 8'b0;
 	cells[0] = 8'b00010000; // LDI
 	cells[1] = 8'b01010101; // PATTERN
 	cells[2] = 8'b10101010; // PATTERN

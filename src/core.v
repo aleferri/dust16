@@ -9,38 +9,19 @@
 // 110: ST_BYTE_L
 // 111: ST_BYTE_H
 
-/*
-read_verilog F:\Progetti\CPU\Architetture\Developing\Dust16\core.v
-proc
-wreduce
-opt
-freduce
-opt
-fsm
-opt
-pmuxtree
-opt
-muxcover
-opt
-techmap
-wreduce
-freduce
-opt
-*/
-
 module core#(
-    parameter ADR_TOP = 15,
-    parameter DAT_TOP = 15
+    parameter ADR_MSB = 15,
+    parameter DAT_MSB = 15
 )(
     input       wire            clk,
     input       wire            rst,
     
     input       wire            m_wait,
-    input       wire[7:0]       m_indata,
-    output      wire[7:0]       m_outdata,
-    output      wire[ADR_TOP:0] m_addr,
-    output      wire            m_req,
-    output      wire            m_wr
+    input       wire[7:0]       m_idata,
+    output      wire[7:0]       m_odata,
+    output      wire[ADR_MSB:0] m_addr,
+    output      wire            m_cs,
+    output      wire            m_we
 );
 
 localparam CS_HOLD      = 3'b000;
@@ -62,32 +43,33 @@ localparam OP_MVX = 3'b101; // move to x
 localparam OP_JMP = 3'b110; // direct jump
 localparam OP_JPC = 3'b111; // 4'b111c where c = condition (0: ac[15], 1: ac == 0)
 
-reg [DAT_TOP:0] dr;
-reg [DAT_TOP:0] ac;
-reg [ADR_TOP:0] ix;
-reg [ADR_TOP:0] pc;
-reg [5:0]  ir;
-reg [7:0]  db;
-reg ac_isz;
+reg [DAT_MSB:0] dr;         // Data register, target of every load
+reg [DAT_MSB:0] ac;         // Accumulator, is the first source and the destination of all ALU ops
+reg [ADR_MSB:0] ix;         // Index register, point to the address of any memory instruction
+reg [ADR_MSB:0] pc;         // Program counter, point to the next instruction
+reg [5:0]       ir;         // Instruction register, hold the current opcode
+reg [7:0]       db;         // Data buffer, buffer either the top 8 bit or the lower 8 bit of the register
+reg             ac_isz;     // AC is zero
+reg             ac_carry;   // Carry is present
 
-reg [2:0] status;
+reg [2:0]       status;     // Status of the core
 
-reg ar_sel;
-reg ar_set_bit;
-reg mem_req;
-reg mem_wr;
+reg             ar_sel;     // Select IX/PC for the address output
+reg             ar_set_bit; // Force Set the LSB of the address
+reg             mem_req;    // Memory required
+reg             mem_wr;     // Memory write
 
-assign m_addr = ar_sel ? { pc[ADR_TOP:1], pc[0] | ar_set_bit } : { ix[ADR_TOP:1], ix[0] | ar_set_bit };
-assign m_outdata = db;
-assign m_req = mem_req;
-assign m_wr = mem_wr;
+assign m_addr = ar_sel ? { pc[ADR_MSB:1], pc[0] | ar_set_bit } : { ix[ADR_MSB:1], ix[0] | ar_set_bit };
+assign m_odata = db;
+assign m_cs = mem_req;
+assign m_we = mem_wr;
 
-wire is_fetch = status == CS_FETCH;
-wire is_decode = status == CS_DECODE;
-wire is_ld_byte_l = status == CS_LD_BYTE_L;
-wire is_ld_byte_h = status == CS_LD_BYTE_H;
-wire is_st_byte_l = status == CS_ST_BYTE_L;
-wire is_st_byte_h = status == CS_ST_BYTE_H;
+reg is_fetch;
+reg is_decode;
+reg is_ld_byte;
+reg is_ld_byte_l;
+reg is_st_byte_l;
+reg is_st_byte_h;
 
 wire is_ldi = ~ir[5] & ~ir[4] & ~ir[3];
 wire is_ldm = ~ir[5] & ~ir[4] & ir[3];
@@ -100,18 +82,14 @@ wire is_jpc = ir[5] & ir[4] & ir[3];
 
 wire is_mem_op = ~ir[5];
 wire is_full_word = ir[2];
-wire[2:0] next_mem_status  = { 1'b1, ir[4], 1'b0 };
-
-wire dr_rdl = is_ld_byte_l & ~m_wait;
-wire dr_rdh = is_ld_byte_h & ~m_wait;
-wire ir_rd  = is_fetch & ~m_wait;
+wire[2:0] next_mem_status  = { 1'b1, ir[4], 1'b0 };     
 
 always @(posedge clk) begin
-    if (dr_rdl) begin
-        dr[7:0] <= m_indata;
+    if (is_ld_byte_l) begin     // NOTE, if m_idata is garbage (so m_wait is zero) the read will be repeated
+        dr[7:0] <= m_idata;
     end
-    if (dr_rdh) begin
-        dr[DAT_TOP:8] <= m_indata;
+    if (is_ld_byte) begin       // NOTE, if m_idata is garbage (so m_wait is zero) the read will be repeated
+        dr[DAT_MSB:8] <= m_idata & { status[0], status[0], status[0], status[0], status[0], status[0], status[0], status[0] };
     end
 end
 
@@ -119,24 +97,25 @@ wire use_alu_sel = is_decode & is_alu;
 wire[2:0] alu_sel = ir[2:0] & { use_alu_sel, use_alu_sel, use_alu_sel };
 
 // pseudo reg
-reg[DAT_TOP:0] alu_rs;
+reg[DAT_MSB:0] alu_rs;
+reg carry;
 
 always @(*) begin
     case(alu_sel)
-        3'b000: alu_rs = ac;
-        3'b001: alu_rs = dr;
-        3'b010: alu_rs = ac + dr;
-        3'b011: alu_rs = ac + ~dr + 1'b1;
-        3'b100: alu_rs = ac & dr;
-        3'b101: alu_rs = ac | dr;
-        3'b110: alu_rs = ac ^ dr;
-        3'b111: alu_rs = { 1'b0, ac[DAT_TOP:1] };
+        3'b000: { carry, alu_rs } = { ac_carry, ac };
+        3'b001: { carry, alu_rs } = { 1'b0, dr };
+        3'b010: { carry, alu_rs } = ac + dr;
+        3'b011: { carry, alu_rs } = ac + ~dr + 1'b1;
+        3'b100: { carry, alu_rs } = { 1'b0, ac & dr };
+        3'b101: { carry, alu_rs } = { 1'b0, ac | dr };
+        3'b110: { carry, alu_rs } = { 1'b0, ac ^ dr };
+        3'b111: { carry, alu_rs } = { ac[0], ac_carry, ac[DAT_MSB:1] };
     endcase
 end
 
 always @(posedge clk) begin
-    if (ir_rd) begin
-        ir <= m_indata[7:2];
+    if (is_fetch) begin         // NOTE, even if memory is garbage, the opcode will be fetched again next cycle because ~m_wait
+        ir <= m_idata[7:2];
     end
 end
 
@@ -167,10 +146,10 @@ always @(posedge clk) begin
     mem_req <= next_status[2] | (next_status == CS_FETCH);
 	 
     ar_set_bit <= next_status[2] & next_status[0];    
-	ar_sel <= ( ~next_status[2] & ( ~next_status[1] ^ ~next_status[2] ) ) | (next_status[2] & is_ldi) | rst;
+    ar_sel <= ( ~next_status[2] & ( ~next_status[1] ^ ~next_status[2] ) ) | (next_status[2] & is_ldi) | rst;
     
     if (next_status == CS_ST_BYTE_H) begin
-        db <= ir[2] ? pc[ADR_TOP:8] : ac[DAT_TOP:8];
+        db <= ir[2] ? pc[ADR_MSB:8] : ac[DAT_MSB:8];
     end else begin
         db <= ir[2] ? pc[7:0] : ac[7:0];
     end
@@ -184,6 +163,13 @@ always @(posedge clk) begin
 	`endif
     
     status <= next_status;
+    
+    is_fetch <= next_status == CS_FETCH;
+    is_decode <= next_status == CS_DECODE;
+    is_ld_byte <= next_status[2] & ~next_status[1];
+    is_ld_byte_l <= next_status == CS_LD_BYTE_L;
+    is_st_byte_l <= next_status == CS_ST_BYTE_L;
+    is_st_byte_h <= next_status == CS_ST_BYTE_H;
 end
 
 always @(posedge clk) begin
@@ -195,15 +181,16 @@ end
 always @(posedge clk) begin
     ac <= alu_rs;
     ac_isz <= (ac == 16'b0);
+	ac_carry <= carry;
 end
 
-wire do_jpc = ac_isz & ~ir[2] | ac[15] & ir[2];
+wire do_jpc = ac_isz & ~ir[2] | ac_carry & ir[2];
 
 wire ld_pc = (is_decode & (is_jmp | is_jpc & do_jpc)) | (is_st_byte_h & is_jal & ~m_wait) | rst;
-wire inc_pc = (is_fetch | is_ld_byte_l | is_ld_byte_h) & ar_sel & ~m_wait;
+wire inc_pc = (is_fetch | is_ld_byte) & ar_sel & ~m_wait;
 
 always @(posedge clk) begin
-	 if (ld_pc) begin
+	if (ld_pc) begin
         pc <= rst ? 16'b0 : dr;
     end else begin
         pc <= pc + inc_pc;

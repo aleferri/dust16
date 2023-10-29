@@ -1,0 +1,77 @@
+
+.reset:
+            LDI 0
+            MVX
+            MVA
+            LDI .alu_test
+            JMP
+            NOP
+            NOP
+            NOP
+            JMP
+.alu_test:
+            LDI 1024
+            ADD         ; AC = 1024
+            SHR         ; AC = 512
+            AND         ; AC = 0
+            XOR         ; AC = 1024
+            SHR         ; AC = 512
+            ORA         ; AC = 1536
+            SUB         ; AC = 512
+            NOP         ; AC = 512
+            MVX         ; IX = 1024
+            STA         ; m[1024] = 0, m[1025] = 4
+            LDI 0
+            MVA         ; AC = 0
+            LDW         ; DR = 1024
+            MVA         ; AC = 1024
+.jmp_test:
+            JCS         ; Jump if carry (ignored)
+            LDI 65000
+            ADD
+            LDI .L1
+            JCS         ; should jump
+            NOP
+            NOP
+            NOP
+            LDI .error
+            JMP
+.L1:    
+            JZA         ; Jump if A is zero (ignored)
+            LDM
+            MVA
+            SUB
+            LDI .L2
+            JZA         ; should jump
+            NOP
+            NOP
+            NOP
+            LDI .error
+            JMP
+.L2:        
+            LDI 2048
+            MVX
+            LDI .F1
+            JAL
+            LDI .endloop
+            JMP
+            NOP
+            NOP
+.endloop:
+            JMP
+            NOP
+            NOP
+
+__F1:
+            LDI 255
+            MVA
+            LDI 2048
+            MVX
+            LDW
+            JMP
+            NOP
+            NOP
+            
+            
+__error:    JMP
+            
