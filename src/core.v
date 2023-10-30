@@ -37,15 +37,16 @@ localparam CS_ST_BYTE_H = 3'b111;
 localparam OP_LDI = 3'b000; // 4'b0001
 localparam OP_LDM = 3'b001; // 4'b001w
 localparam OP_STM = 3'b010; // 4'b010w
-localparam OP_JAL = 3'b011; // 4'b0111
+localparam OP_STL = 3'b011; // 4'b0111 Store link register
 localparam OP_ALU = 3'b100; // operate alu
 localparam OP_MVX = 3'b101; // move to x
-localparam OP_JMP = 3'b110; // direct jump
-localparam OP_JPC = 3'b111; // 4'b111c where c = condition (0: ac[15], 1: ac == 0)
+localparam OP_JMP = 3'b110; // direct jump to dr address, if ir[0] is 1, PC is saved to LR
+localparam OP_JPC = 3'b111; // 4'b111c where c = condition (0: carry, 1: ac == 0)
 
 reg [DAT_MSB:0] dr;         // Data register, target of every load
 reg [DAT_MSB:0] ac;         // Accumulator, is the first source and the destination of all ALU ops
 reg [ADR_MSB:0] ix;         // Index register, point to the address of any memory instruction
+reg [ADR_MSB:0] lr;         // Link register
 reg [ADR_MSB:0] pc;         // Program counter, point to the next instruction
 reg [5:0]       ir;         // Instruction register, hold the current opcode
 reg [7:0]       db;         // Data buffer, buffer either the top 8 bit or the lower 8 bit of the register
@@ -59,7 +60,7 @@ reg             ar_set_bit; // Force Set the LSB of the address
 reg             mem_req;    // Memory required
 reg             mem_wr;     // Memory write
 
-assign m_addr = ar_sel ? { pc[ADR_MSB:1], pc[0] | ar_set_bit } : { ix[ADR_MSB:1], ix[0] | ar_set_bit };
+assign m_addr = ar_sel ? pc[ADR_MSB:0] : { ix[ADR_MSB:1], ix[0] | ar_set_bit };
 assign m_odata = db;
 assign m_cs = mem_req;
 assign m_we = mem_wr;
@@ -68,13 +69,11 @@ reg is_fetch;
 reg is_decode;
 reg is_ld_byte;
 reg is_ld_byte_l;
-reg is_st_byte_l;
-reg is_st_byte_h;
 
 wire is_ldi = ~ir[5] & ~ir[4] & ~ir[3];
 wire is_ldm = ~ir[5] & ~ir[4] & ir[3];
 wire is_stm = ~ir[5] & ir[4] & ~ir[3];
-wire is_jal = ~ir[5] & ir[4] & ir[3];
+wire is_stl = ~ir[5] & ir[4] & ir[3];
 wire is_alu = ir[5] & ~ir[4] & ~ir[3];
 wire is_mvx = ir[5] & ~ir[4] & ir[3];
 wire is_jmp = ir[5] & ir[4] & ~ir[3];
@@ -148,11 +147,12 @@ always @(posedge clk) begin
     ar_set_bit <= next_status[2] & next_status[0];    
     ar_sel <= ( ~next_status[2] & ( ~next_status[1] ^ ~next_status[2] ) ) | (next_status[2] & is_ldi) | rst;
     
-    if (next_status == CS_ST_BYTE_H) begin
-        db <= ir[2] ? pc[ADR_MSB:8] : ac[DAT_MSB:8];
-    end else begin
-        db <= ir[2] ? pc[7:0] : ac[7:0];
-    end
+    case({ir[3], next_status[0]})
+    2'b00: db <= ac[7:0];
+    2'b01: db <= ac[DAT_MSB:8];
+    2'b10: db <= lr[7:0];
+    2'b11: db <= lr[ADR_MSB:8];
+    endcase
 	
 	`ifdef SIM_DEBUG
 	
@@ -168,13 +168,17 @@ always @(posedge clk) begin
     is_decode <= next_status == CS_DECODE;
     is_ld_byte <= next_status[2] & ~next_status[1];
     is_ld_byte_l <= next_status == CS_LD_BYTE_L;
-    is_st_byte_l <= next_status == CS_ST_BYTE_L;
-    is_st_byte_h <= next_status == CS_ST_BYTE_H;
 end
 
 always @(posedge clk) begin
     if (is_decode & is_mvx) begin
         ix <= dr;
+    end
+end
+
+always @(posedge clk) begin
+    if (is_decode & is_jmp & ir[0]) begin
+        lr <= pc;
     end
 end
 
@@ -186,7 +190,7 @@ end
 
 wire do_jpc = ac_isz & ~ir[2] | ac_carry & ir[2];
 
-wire ld_pc = (is_decode & (is_jmp | is_jpc & do_jpc)) | (is_st_byte_h & is_jal & ~m_wait) | rst;
+wire ld_pc = (is_decode & (is_jmp | is_jpc & do_jpc)) | rst;
 wire inc_pc = (is_fetch | is_ld_byte) & ar_sel & ~m_wait;
 
 always @(posedge clk) begin

@@ -1,0 +1,104 @@
+
+.num 16 "0x" ""
+.num 2 "0b" ""
+
+.opcode LDI {{ imm }}
+.with ( imm : Ints ) -> {
+    .if imm > 65535 {
+        .error imm, "Cannot embed more than 16 bits for an immediate";
+    }
+    .if imm > 255 {
+        .out [ imm & 255, imm >> 8 ]; 
+    }
+    .out [ imm ];
+}
+
+.opcode LDB {{ }}
+.with () -> {
+    .out [ 0b00100000 ];
+}
+
+.opcode LDW {{ }}
+.with () -> {
+    .out [ 0b00110000 ];
+}
+
+.opcode STB {{ }}
+.with () -> {
+    .out [ 0b01000000 ];
+}
+
+.opcode STW {{ }}
+.with () -> {
+    .out [ 0b01010000 ];
+}
+
+.opcode STL {{ }}
+.with () -> {
+    .out [ 0b01110000 ];
+}
+
+.opcode NOP {{ }}
+.with () -> {
+    .out [ 0b10000000 ];
+}
+
+.opcode MVA {{ }}
+.with () -> {
+    .out [ 0b10000100 ];
+}
+
+.opcode ADD {{ }}
+.with () -> {
+    .out [ 0b10001000 ];
+}
+
+.opcode SUB {{ }}
+.with () -> {
+    .out [ 0b10001100 ];
+}
+
+.opcode AND {{ }}
+.with () -> {
+    .out [ 0b10010000 ];
+}
+
+.opcode ORA {{ }}
+.with () -> {
+    .out [ 0b10010100 ];
+}
+
+.opcode XOR {{ }}
+.with () -> {
+    .out [ 0b10011000 ];
+}
+
+.opcode ROR {{ }}
+.with () -> {
+    .out [ 0b10011100 ];
+}
+
+.opcode MVX {{ }}
+.with () -> {
+    .out [ 0b10100000 ];
+}
+
+.opcode JMP {{ }}
+.with () -> {
+    .out [ 0b11000000 ];
+}
+
+.opcode JAL {{ }}
+.with () -> {
+    .out [ 0b11000100 ];
+}
+
+.opcode JCS {{ }}
+.with () -> {
+    .out [ 0b11100000 ];
+}
+
+.opcode JZA {{ }}
+.with () -> {
+    .out [ 0b11110000 ];
+}
