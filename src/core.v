@@ -37,16 +37,17 @@ localparam CS_ST_BYTE_H = 3'b111;
 localparam OP_LDI = 3'b000; // 4'b0001
 localparam OP_LDM = 3'b001; // 4'b001w
 localparam OP_STM = 3'b010; // 4'b010w
-localparam OP_STL = 3'b011; // 4'b0111 Store link register
 localparam OP_ALU = 3'b100; // operate alu
-localparam OP_MVX = 3'b101; // move to x
+localparam OP_MVX = 3'b101; // move DR to ix
+localparam OP_MVT = 3'b101; // move ix/ac to TR
 localparam OP_JMP = 3'b110; // direct jump to dr address, if ir[0] is 1, PC is saved to LR
 localparam OP_JPC = 3'b111; // 4'b111c where c = condition (0: carry, 1: ac == 0)
 
 reg [DAT_MSB:0] dr;         // Data register, target of every load
 reg [DAT_MSB:0] ac;         // Accumulator, is the first source and the destination of all ALU ops
+reg [DAT_MSB:0] tr;         // Transfer register
+
 reg [ADR_MSB:0] ix;         // Index register, point to the address of any memory instruction
-reg [ADR_MSB:0] lr;         // Link register
 reg [ADR_MSB:0] pc;         // Program counter, point to the next instruction
 reg [5:0]       ir;         // Instruction register, hold the current opcode
 reg [7:0]       db;         // Data buffer, buffer either the top 8 bit or the lower 8 bit of the register
@@ -75,7 +76,9 @@ wire is_ldm = ~ir[5] & ~ir[4] & ir[3];
 wire is_stm = ~ir[5] & ir[4] & ~ir[3];
 wire is_stl = ~ir[5] & ir[4] & ir[3];
 wire is_alu = ir[5] & ~ir[4] & ~ir[3];
-wire is_mvx = ir[5] & ~ir[4] & ir[3];
+wire is_mvx = ir[5] & ~ir[4] & ir[3] & ~ir[2] & ~ir[1];
+wire is_inx = ir[5] & ~ir[4] & ir[3] & ~ir[2] & ir[1];
+wire is_mvt = ir[5] & ~ir[4] & ir[3] & ir[2];
 wire is_jmp = ir[5] & ir[4] & ~ir[3];
 wire is_jpc = ir[5] & ir[4] & ir[3];
 
@@ -146,13 +149,8 @@ always @(posedge clk) begin
 	 
     ar_set_bit <= next_status[2] & next_status[0];    
     ar_sel <= ( ~next_status[2] & ( ~next_status[1] ^ ~next_status[2] ) ) | (next_status[2] & is_ldi) | rst;
-    
-    case({ir[3], next_status[0]})
-    2'b00: db <= ac[7:0];
-    2'b01: db <= ac[DAT_MSB:8];
-    2'b10: db <= lr[7:0];
-    2'b11: db <= lr[ADR_MSB:8];
-    endcase
+
+    db <= next_status ? tr[DAT_MS:8] : tr[7:0];
 	
 	`ifdef SIM_DEBUG
 	
@@ -173,13 +171,20 @@ end
 always @(posedge clk) begin
     if (is_decode & is_mvx) begin
         ix <= dr;
+    end else begin
+        ix <= ix + (is_decode & is_inx);
     end
-end
+end 
+
+wire is_jal = is_jmp & ir[0];
 
 always @(posedge clk) begin
-    if (is_decode & is_jmp & ir[0]) begin
-        lr <= pc;
-    end
+    case ({ is_decode & is_mvt, is_decode & (is_mvt | is_jal)})
+    2'b00: tr <= tr;
+    2'b01: tr <= pc;
+    2'b10: tr <= ac;
+    2'b11: tr <= ix;
+    endcase
 end
 
 always @(posedge clk) begin
@@ -209,6 +214,7 @@ always @(negedge clk) begin
 	$display("PC: %d", pc);
 	$display("IR: %d", ir);
 	$display("AC: %d", ac);
+    $display("TR: %d", tr);
 	$display("DR: %b", dr);
 	$display("IX: %d\n", ix);
 end
